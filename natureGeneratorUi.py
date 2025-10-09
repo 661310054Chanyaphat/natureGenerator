@@ -7,7 +7,7 @@ except:
 import maya.OpenMayaUI as omui
 
 
-IMAGE_DIR = 'C:/Users/user/Documents/maya/2024/scripts/natureGenerator'
+IMAGE_DIR = 'C:/Users/user/Documents/maya/2024/scripts/natureGenerator/icons'
 
 
 class NatureGeneratorToolDialog(QtWidgets.QDialog):
