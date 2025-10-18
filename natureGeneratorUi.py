@@ -1,4 +1,4 @@
-try:
+try:   
     from PySide2 import QtCore, QtGui, QtWidgets
     from shiboken2 import wrapInstance
 except:
@@ -8,10 +8,16 @@ import maya.OpenMayaUI as omui
 import maya.cmds as cmds
 import os
 import random
+import sys
+
+script_dir = r"C:/Users/user/Documents/maya/2024/scripts/natureGenerator"
+if script_dir not in sys.path:
+    sys.path.append(script_dir)
+
+import natureGeneratorUtil as utils
 
 IMAGE_DIR = 'C:/Users/user/Documents/maya/2024/scripts/natureGenerator/icons'
 MODEL_DIR = 'C:/Users/user/Documents/maya/2024/scripts/natureGenerator/models'
-
 
 class NatureGeneratorToolDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
@@ -57,35 +63,28 @@ class NatureGeneratorToolDialog(QtWidgets.QDialog):
 
         for name, img in icons:
             vbox = QtWidgets.QVBoxLayout()
-
             img_label = QtWidgets.QLabel()
             pixmap = QtGui.QPixmap(os.path.join(IMAGE_DIR, img))
             if not pixmap.isNull():
                 pixmap = pixmap.scaled(80, 80, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
                 img_label.setPixmap(pixmap)
             img_label.setAlignment(QtCore.Qt.AlignCenter)
-
             check = QtWidgets.QCheckBox(name)
             check.setChecked(False)
-
             vbox.addWidget(img_label)
             vbox.addWidget(check, alignment=QtCore.Qt.AlignCenter)
-
             imageLayout.addLayout(vbox)
             self.checkboxes[name] = check
 
         themeLayout = QtWidgets.QHBoxLayout()
         themeLabel = QtWidgets.QLabel("Select Theme:")
         themeLabel.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
-
         themeCombo = QtWidgets.QComboBox()
         themeCombo.addItems(["Spring", "Autumn", "Winter"])
         themeCombo.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-
         themeLayout.addWidget(themeLabel)
         themeLayout.addWidget(themeCombo)
         self.mainLayout.addLayout(themeLayout)
-
         self.selected_theme_combo = themeCombo
 
         gridLayout = QtWidgets.QGridLayout()
@@ -95,7 +94,6 @@ class NatureGeneratorToolDialog(QtWidgets.QDialog):
             label = QtWidgets.QLabel(label_text)
             label.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
             gridLayout.addWidget(label, row, 0)
-
             if has_range:
                 minEdit = QtWidgets.QLineEdit()
                 minEdit.setPlaceholderText("min")
@@ -125,7 +123,6 @@ class NatureGeneratorToolDialog(QtWidgets.QDialog):
 
         self.generateBtn.clicked.connect(self.generate_objects)
 
-    
     def generate_objects(self):
         try:
             obj_count = int(self.objCountEdit.text())
@@ -156,44 +153,64 @@ class NatureGeneratorToolDialog(QtWidgets.QDialog):
 
         theme = self.selected_theme_combo.currentText()
         selected_types = [name for name, check in self.checkboxes.items() if check.isChecked()]
-
         if not selected_types:
             cmds.warning("Please select at least one object type.")
             return
 
         cmds.undoInfo(openChunk=True)
         created_objs = []
+        positions = []
+
+        def place_on_ground(obj, pos_x, pos_z):
+            shapes = cmds.listRelatives(obj, allDescendents=True, type='mesh', fullPath=True) or []
+            if not shapes:
+                shapes = cmds.listRelatives(obj, type='mesh', fullPath=True) or []
+
+            min_y = None
+            for s in shapes:
+                bbox = cmds.exactWorldBoundingBox(s)
+                if min_y is None or bbox[1] < min_y:
+                    min_y = bbox[1]
+
+            if min_y is None:
+                min_y = 0
+
+            cmds.move(pos_x, -min_y, pos_z, obj, absolute=True)
 
         try:
-            for i in range(obj_count):
-                obj_type = random.choice(selected_types)
-                maya_file = os.path.join(MODEL_DIR, self.model_files[obj_type])
+            for obj_type in selected_types:
+                for i in range(obj_count):
+                    maya_file = os.path.join(MODEL_DIR, self.model_files[obj_type])
+                    if not os.path.exists(maya_file):
+                        cmds.warning(f"Model not found: {maya_file}")
+                        continue
 
-                if not os.path.exists(maya_file):
-                    cmds.warning(f"Model not found: {maya_file}")
-                    continue
-
-                if maya_file.endswith((".ma", ".mb")):
                     imported = cmds.file(maya_file, i=True, ignoreVersion=True, ra=True,
                                          mergeNamespacesOnClash=False, options="v=0;", pr=True, returnNewNodes=True)
-                else:
-                    imported = cmds.file(maya_file, i=True, type="FBX", ignoreVersion=True, ra=True,
-                                         mergeNamespacesOnClash=False, options="fbx", pr=True, returnNewNodes=True)
+                    new_objs = cmds.ls(imported, transforms=True)
+                    if not new_objs:
+                        continue
+                    obj = new_objs[0]
 
-                new_objs = cmds.ls(imported, transforms=True)
-                if not new_objs:
-                    continue
+                    for attempt in range(100):
+                        pos_x = random.uniform(x_min, x_max)
+                        pos_z = random.uniform(z_min, z_max)
+                        too_close = any(((pos_x - px)**2 + (pos_z - pz)**2)**0.5 < min_distance for (px, pz) in positions)
+                        if not too_close:
+                            break
+                    else:
+                        pos_x = random.uniform(x_min, x_max)
+                        pos_z = random.uniform(z_min, z_max)
 
-                obj = new_objs[0]
+                    positions.append((pos_x, pos_z))
 
-                pos_x = random.uniform(x_min, x_max)
-                pos_z = random.uniform(z_min, z_max)
-                pos_y = 0
-                scale = random.uniform(scale_min, scale_max)
+                    scale = random.uniform(scale_min, scale_max)
+                    cmds.scale(scale, scale, scale, obj)
+                    place_on_ground(obj, pos_x, pos_z)
+                    created_objs.append(obj)
 
-                cmds.move(pos_x, pos_y, pos_z, obj)
-                cmds.scale(scale, scale, scale, obj)
-                created_objs.append(obj)
+                  
+                    utils.apply_theme_colors_by_material(obj, obj_type, theme)
 
         except Exception as e:
             cmds.warning(f"Error during generation: {e}")
@@ -201,9 +218,9 @@ class NatureGeneratorToolDialog(QtWidgets.QDialog):
             cmds.undoInfo(closeChunk=True)
 
         if created_objs:
+            summary = ", ".join([f"{obj_count} {t}s" for t in selected_types])
             cmds.select(created_objs)
-            cmds.inViewMessage(amg=f"<hl>{len(created_objs)} objects created!</hl>",
-                               pos='midCenter', fade=True)
+            cmds.inViewMessage(amg=f"<hl>Created {summary} successfully!</hl>", pos='midCenter', fade=True)
 
 
 def run():
@@ -212,7 +229,6 @@ def run():
         ui.close()
     except:
         pass
-
     ptr = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
     ui = NatureGeneratorToolDialog(parent=ptr)
     ui.show()
